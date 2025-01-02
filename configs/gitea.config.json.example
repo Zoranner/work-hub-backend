@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "port": 8090,
+  "tokens": {
+    "as_token": "your_as_token_here",
+    "hs_token": "your_hs_token_here"
+  },
+  "homeserver": {
+    "url": "http://matrix-synapse:8008",
+    "domain": "matrix.example.com"
+  },
+  "bridge": {
+    "url": "http://localhost:8090"
+  }
+} 

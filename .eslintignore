@@ -1,0 +1,11 @@
+.vscode
+.idea
+.husky
+.local
+.eslintrc.js
+.prettierrc.js
+dist
+docs
+node_modules
+*.md
+*.sh
