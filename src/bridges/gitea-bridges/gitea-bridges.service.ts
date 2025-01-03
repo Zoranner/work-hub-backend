@@ -1,11 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SynapseConfig } from '../../configs/synapse.config';
 import { BridgesService } from '../bases/bridges-service';
+import { Repository } from 'typeorm';
+import { EncryptionSession } from '../bases/entities/encryption-session.entity';
+import { InjectRepository } from '@nestjs/typeorm';
 
 @Injectable()
 export class GiteaBridgesService extends BridgesService {
-  constructor() {
-    super('gitea');
+  constructor(
+    @InjectRepository(EncryptionSession)
+    protected sessionRepository: Repository<EncryptionSession>,
+  ) {
+    super('gitea', sessionRepository);
   }
 
   async dealWebhook(body: any): Promise<string> {
@@ -36,9 +42,9 @@ export class GiteaBridgesService extends BridgesService {
     }
 
     // 使用 bridge 发送消息
-    if (message && SynapseConfig.defaultRoomId) {
-      await this.sendMessage(SynapseConfig.defaultRoomId, message, true);
-    }
+    // if (message && SynapseConfig.defaultRoomId) {
+    //   await this.sendMessage(intent, SynapseConfig.defaultRoomId, message, true);
+    // }
 
     return message;
   }

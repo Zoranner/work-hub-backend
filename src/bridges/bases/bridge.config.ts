@@ -1,6 +1,10 @@
 export interface BridgeConfig {
   enabled: boolean;
   port?: number;
+  displayName?: string;
+  bridge?: {
+    url: string;
+  };
   tokens?: {
     as_token: string;
     hs_token: string;
@@ -8,8 +12,5 @@ export interface BridgeConfig {
   homeserver?: {
     url: string;
     domain: string;
-  };
-  bridge?: {
-    url: string;
   };
 } 
