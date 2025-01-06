@@ -13,4 +13,4 @@ export interface BridgeConfig {
     url: string;
     domain: string;
   };
-} 
+}

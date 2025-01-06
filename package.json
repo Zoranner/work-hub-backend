@@ -48,7 +48,9 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.1.14",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.20"
+    "typeorm": "^0.3.20",
+    "@matrix-org/olm": "^3.2.15",
+    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^9.5.0",
