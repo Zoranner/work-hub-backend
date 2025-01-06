@@ -23,6 +23,7 @@
     "pkg:alpine": "pkg . -t alpine --out-path=pack/"
   },
   "dependencies": {
+    "@matrix-org/matrix-sdk-crypto-nodejs": "0.3.0-beta.1",
     "@nestjs/common": "^9.4.3",
     "@nestjs/config": "^2.3.4",
     "@nestjs/core": "^9.4.3",
@@ -32,6 +33,7 @@
     "@nestjs/platform-express": "^9.4.3",
     "@nestjs/schedule": "^2.2.3",
     "@nestjs/typeorm": "^9.0.1",
+    "@vector-im/matrix-bot-sdk": "0.7.1-element.7",
     "body-parser": "^1.20.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.13.2",
@@ -39,7 +41,6 @@
     "dayjs": "^1.11.13",
     "duan-hub-sdk": "^0.0.8",
     "marked": "^15.0.4",
-    "matrix-appservice-bridge": "^10.3.1",
     "multer": "1.4.5-lts.1",
     "nanoid": "^3.3.8",
     "passport": "^0.5.3",
@@ -48,9 +49,7 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.1.14",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.20",
-    "@matrix-org/olm": "^3.2.15",
-    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.1.0"
+    "typeorm": "^0.3.20"
   },
   "devDependencies": {
     "@nestjs/cli": "^9.5.0",

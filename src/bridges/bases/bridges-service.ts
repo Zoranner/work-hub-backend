@@ -1,33 +1,31 @@
 import { Logger, OnModuleInit } from '@nestjs/common';
 import {
-  AppServiceRegistration,
-  Bridge,
-  BridgeContext,
-  EncryptedIntent,
-  Intent,
-  Request,
-  WeakEvent,
-} from 'matrix-appservice-bridge';
-import { BridgeConfig } from './bridge.config';
+  Appservice,
+  IAppserviceRegistration,
+  MatrixClient,
+  LogService,
+  RichConsoleLogger,
+  SimpleFsStorageProvider,
+  AutojoinRoomsMixin,
+  LogLevel,
+  RustSdkAppserviceCryptoStorageProvider,
+  MessageEvent,
+  SimpleRetryJoinStrategy,
+} from '@vector-im/matrix-bot-sdk';
+import { StoreType } from '@matrix-org/matrix-sdk-crypto-nodejs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { marked } from 'marked';
-import { EncryptionStore } from './encryption-store';
-import { Repository } from 'typeorm';
-import { EncryptionSession } from './entities/encryption-session.entity';
-import { ClientEncryptionStore } from 'matrix-appservice-bridge';
+import { BridgeConfig } from './bridge.config';
 
 export abstract class BridgesService implements OnModuleInit {
   protected readonly appId: string;
-  protected readonly displayName: string;
-  protected bridge: Bridge;
+  protected appservice: Appservice;
+  protected botClient: MatrixClient;
   protected config: BridgeConfig;
   protected readonly logger = new Logger(BridgesService.name);
 
-  constructor(
-    appId: string,
-    protected sessionRepository: Repository<EncryptionSession>,
-  ) {
+  constructor(appId: string) {
     this.appId = appId;
     this.loadConfig();
   }
@@ -58,7 +56,7 @@ export abstract class BridgesService implements OnModuleInit {
     }
 
     // 创建注册信息
-    const registration = AppServiceRegistration.fromObject({
+    const registration: IAppserviceRegistration = {
       id: `${this.appId}-bridge`,
       url: this.config.bridge.url,
       as_token: this.config.tokens.as_token,
@@ -79,48 +77,140 @@ export abstract class BridgesService implements OnModuleInit {
         ],
         aliases: [],
       },
-    });
-
-    // 配置 bridge
-    const bridgeOpts = {
-      homeserverUrl: this.config.homeserver.url,
-      domain: this.config.homeserver.domain,
-      registration,
-      controller: {
-        onEvent: this.onEvent.bind(this),
-        onUserQuery: this.onUserQuery.bind(this),
-      },
-      cryptoStore: this.createEncryptionStore(),
-      enableCrypto: true,
-      cryptoRunInProcess: true,
+      protocols: [],
+      rate_limited: false,
+      'de.sorunome.msc2409.push_ephemeral': true,
     };
 
     try {
-      this.bridge = new Bridge(bridgeOpts);
-      await this.bridge.initialise();
+      // 设置存储
+      const storage = new SimpleFsStorageProvider(path.join(process.cwd(), 'storage', this.appId));
 
-      const intent = this.bridge.getIntent();
-      await intent.ensureRegistered();
-      this.logBridgeMessage(`user(@${this.appId}:${this.config.homeserver.domain}) registered`);
-      await intent.setDisplayName(`${this.config.displayName} 助手`);
+      // 确保加密存储目录存在
+      const cryptoPath = path.join(process.cwd(), 'data', 'crypto', this.appId);
+      if (!fs.existsSync(cryptoPath)) {
+        fs.mkdirSync(cryptoPath, { recursive: true });
+      }
 
-      await this.bridge.run(this.config.port);
+      // 设置加密存储
+      const cryptoStore = new RustSdkAppserviceCryptoStorageProvider(cryptoPath, StoreType.Sqlite);
+
+      // 设置日志
+      LogService.setLogger(new RichConsoleLogger());
+      LogService.setLevel(LogLevel.DEBUG);
+
+      // 创建 Appservice
+      this.appservice = new Appservice({
+        port: this.config.port,
+        bindAddress: '0.0.0.0',
+        homeserverUrl: this.config.homeserver.url,
+        homeserverName: this.config.homeserver.domain,
+        storage: storage,
+        registration: registration,
+        cryptoStorage: cryptoStore,
+        joinStrategy: new SimpleRetryJoinStrategy(),
+        intentOptions: {
+          encryption: true,
+        },
+      });
+
+      // 获取 bot client
+      this.botClient = this.appservice.botIntent.underlyingClient;
+      await this.appservice.botIntent.enableEncryption();
+      AutojoinRoomsMixin.setupOnClient(this.botClient);
+
+      // 设置事件处理
+      this.appservice.on('room.message', this.handleMessage.bind(this));
+      this.appservice.on('room.encrypted', this.handleEncryptedMessage.bind(this));
+      this.appservice.on('room.join', this.handleJoin.bind(this));
+      this.appservice.on('room.failed_decryption', this.handleFailedDecryption.bind(this));
+      this.appservice.on('query.user', this.handleUserQuery.bind(this));
+      this.appservice.on('query.key', this.handleKeyQuery.bind(this));
+      this.appservice.on('query.key_claim', this.handleKeyClaimQuery.bind(this));
+
+      // 启动服务
+      await this.appservice.begin();
       this.logBridgeMessage(`started on port ${this.config.port}`);
+
+      // 设置机器人显示名称
+      await this.botClient.setDisplayName(`${this.config.displayName} 助手`);
+      this.logBridgeMessage(`display name set to ${this.config.displayName} 助手`);
     } catch (error) {
       this.logBridgeError(`start bridge failed: ${error.message}`);
       throw error;
     }
   }
 
-  protected async handleMessage(roomId: string, sender: string, content: string) {
-    this.logBridgeMessage(`handling message from ${sender} in room ${roomId}: ${content}`);
+  protected async handleMessage(roomId: string, event: any) {
+    if (event.sender === (await this.botClient.getUserId())) {
+      return;
+    }
+
+    const message = new MessageEvent(event);
+    if (message.messageType === 'm.text') {
+      this.logBridgeMessage(`handling message from ${event.sender} in room ${roomId}: ${message.textBody}`);
+      await this.processMessage(roomId, event.sender, message.textBody);
+    }
   }
 
-  async sendMessage(intent: Intent | EncryptedIntent, roomId: string, content: string, markdown: boolean = false) {
+  protected async handleEncryptedMessage(roomId: string, event: any) {
+    if (event.sender === (await this.botClient.getUserId())) {
+      return;
+    }
+
     try {
-      const client = intent.matrixClient;
-      // 准备消息内容
-      let messageContent: { msgtype: string; format?: string; formatted_body?: string; body: string };
+      const message = new MessageEvent(event);
+      if (message.messageType === 'm.text') {
+        this.logBridgeMessage(`handling encrypted message from ${event.sender} in room ${roomId}: ${message.textBody}`);
+        await this.processMessage(roomId, event.sender, message.textBody);
+      }
+    } catch (error) {
+      this.logBridgeError(`handle encrypted message failed: ${error.message}`);
+    }
+  }
+
+  protected async handleFailedDecryption(roomId: string, event: any, error: Error) {
+    this.logBridgeError(`Failed to decrypt message in room ${roomId}: ${error.message}`);
+  }
+
+  protected async handleKeyQuery(req: any, done: (response: any) => void) {
+    this.logBridgeMessage(`Key query request: ${JSON.stringify(req)}`);
+    done({});
+  }
+
+  protected async handleKeyClaimQuery(req: any, done: (response: any) => void) {
+    this.logBridgeMessage(`Key claim request: ${JSON.stringify(req)}`);
+    done({});
+  }
+
+  protected async processMessage(roomId: string, sender: string, content: string) {
+    // 子类实现具体的消息处理逻辑
+  }
+
+  protected async handleJoin(roomId: string, event: any) {
+    this.logBridgeMessage(`joined room ${roomId}`);
+    await this.sendMessage(roomId, `已加入房间 ${roomId}`, true);
+
+    // 如果是加密房间，确保启用加密
+    if (await this.botClient.crypto.isRoomEncrypted(roomId)) {
+      await this.botClient.crypto.prepare();
+    }
+  }
+
+  protected async handleUserQuery(userId: string) {
+    this.logBridgeMessage(`received user query: ${userId}`);
+    if (userId === `@${this.appId}:${this.config.homeserver.domain}`) {
+      return {
+        name: this.appId,
+        display_name: this.config.displayName,
+      };
+    }
+    return null;
+  }
+
+  async sendMessage(roomId: string, content: string, markdown: boolean = false) {
+    try {
+      let messageContent: any;
       if (markdown) {
         const htmlContent = await marked(content);
         messageContent = {
@@ -136,78 +226,13 @@ export abstract class BridgesService implements OnModuleInit {
         };
       }
 
-      // 发送消息
-      const eventId = await client.sendMessage(roomId, messageContent);
+      const eventId = await this.botClient.sendMessage(roomId, messageContent);
       this.logBridgeMessage(`message sent: ${eventId}`);
       return eventId;
     } catch (error) {
       this.logBridgeError(`send message failed: ${error.message}`);
       throw error;
     }
-  }
-
-  protected async onEvent(request: Request<WeakEvent>, context: BridgeContext) {
-    const event = request.getData();
-    const intent = this.bridge.getIntent();
-
-    try {
-      // 处理房间成员事件
-      if (
-        event.type === 'm.room.member' &&
-        event.content?.membership === 'invite' &&
-        event.state_key === `@${this.appId}:${this.config.homeserver.domain}`
-      ) {
-        await intent.join(event.room_id);
-        await this.sendMessage(intent, event.room_id, `Joined room ${event.room_id}`, true);
-        this.logBridgeMessage(`joined room ${event.room_id}`);
-        return;
-      }
-
-      // 处理加密消息
-      if (event.type === 'm.room.encrypted') {
-        this.logBridgeMessage(`received encrypted message from ${event.sender} in room ${event.room_id}`);
-
-        const content = event.content;
-        if (!content) {
-          this.logBridgeWarn(`encrypted message content is empty`);
-          return;
-        }
-
-        if (content.msgtype === 'm.text' && typeof content.body === 'string') {
-          await this.handleMessage(event.room_id, event.sender, content.body);
-        } else {
-          this.logBridgeWarn(`unsupported encrypted message type: ${content.msgtype}`);
-        }
-        return;
-      }
-
-      // 处理普通消息
-      if (event.type === 'm.room.message') {
-        const content = event.content;
-        if (content?.msgtype === 'm.text' && typeof content.body === 'string') {
-          this.logBridgeMessage(`received message from ${event.sender} in room ${event.room_id}`);
-          await this.handleMessage(event.room_id, event.sender, content.body);
-        } else {
-          this.logBridgeWarn(`unsupported message type: ${content?.msgtype}`);
-        }
-        return;
-      }
-    } catch (error) {
-      this.logBridgeError(`handle event failed: ${error.message}`);
-      throw error;
-    }
-  }
-
-  protected onUserQuery(userQuery: { userId: string }) {
-    const userId = userQuery.userId;
-    this.logBridgeMessage(`received user query: ${userId}`);
-    if (userId === `@${this.appId}:${this.config.homeserver.domain}`) {
-      return {
-        name: this.appId,
-        display_name: this.config.displayName,
-      };
-    }
-    return null;
   }
 
   protected logBridgeMessage(message: string) {
@@ -220,14 +245,5 @@ export abstract class BridgesService implements OnModuleInit {
 
   protected logBridgeError(message: string) {
     this.logger.error(`${BridgesService.name} ${this.appId}-bridge ${message}`);
-  }
-
-  private createEncryptionStore(): ClientEncryptionStore {
-    const store = new EncryptionStore(this.sessionRepository);
-    return {
-      getStoredSession: store.getStoredSession.bind(store),
-      setStoredSession: store.setStoredSession.bind(store),
-      updateSyncToken: store.updateSyncToken.bind(store),
-    };
   }
 }

@@ -2,16 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { SynapseConfig } from '../../configs/synapse.config';
 import { BridgesService } from '../bases/bridges-service';
 import { Repository } from 'typeorm';
-import { EncryptionSession } from '../bases/entities/encryption-session.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 
 @Injectable()
 export class GiteaBridgesService extends BridgesService {
-  constructor(
-    @InjectRepository(EncryptionSession)
-    protected sessionRepository: Repository<EncryptionSession>,
-  ) {
-    super('gitea', sessionRepository);
+  constructor() {
+    super('gitea');
   }
 
   async dealWebhook(body: any): Promise<string> {

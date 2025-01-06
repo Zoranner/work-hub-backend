@@ -1,0 +1,55 @@
+{
+    "typescript": {
+        "importOrder": [
+            "^@nestjs/(.*)$",
+            "^@typeorm/(.*)$",
+            "^@/utils/(.*)$",
+            "^@/configs/(.*)$",
+            "^@/filters/(.*)$",
+            "^@/interceptors/(.*)$",
+            "^@/auth/(.*)$",
+            "^@/users/(.*)$",
+            "^@/bridges/(.*)$",
+            "^@/(.*)$",
+            "^[./]"
+        ],
+        "importOrderSeparation": true,
+        "importOrderSortSpecifiers": true
+    },
+    "formatter": {
+        "indentStyle": "space",
+        "indentWidth": 2
+    },
+    "linter": {
+        "rules": {
+            "@typescript-eslint/explicit-function-return-type": "warn",
+            "@typescript-eslint/explicit-module-boundary-types": "warn",
+            "@typescript-eslint/no-explicit-any": "warn",
+            "@typescript-eslint/no-unused-vars": "error",
+            "no-console": "warn",
+            "max-len": ["warn", { "code": 100 }],
+            "import/prefer-default-export": "off",
+            "@typescript-eslint/naming-convention": [
+                "warn",
+                {
+                    "selector": "interface",
+                    "format": ["PascalCase"],
+                    "prefix": ["I"]
+                },
+                {
+                    "selector": "enum",
+                    "format": ["PascalCase"]
+                }
+            ]
+        }
+    },
+    "exclude": [
+        "node_modules",
+        "dist",
+        "build",
+        "coverage",
+        ".pnpm-store",
+        "**/*.spec.ts",
+        "**/*.test.ts"
+    ]
+}
