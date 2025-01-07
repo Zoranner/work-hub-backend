@@ -84,12 +84,11 @@ export abstract class BridgesService implements OnModuleInit {
 
     try {
       // 初始化存储和加密
-      const storage = new SimpleFsStorageProvider(path.join(process.cwd(), 'storage', this.appId));
-      const cryptoPath = path.join(process.cwd(), 'data', 'crypto', this.appId);
-      if (!fs.existsSync(cryptoPath)) {
-        fs.mkdirSync(cryptoPath, { recursive: true });
-      }
-      const cryptoStore = new RustSdkAppserviceCryptoStorageProvider(cryptoPath, StoreType.Sqlite);
+      const storage = new SimpleFsStorageProvider(this.getDataPath('storage'));
+      const cryptoStore = new RustSdkAppserviceCryptoStorageProvider(
+        this.getDataPath('crypto'),
+        StoreType.Sqlite
+      );
 
       // 设置日志
       LogService.setLogger(new RichConsoleLogger());
@@ -250,6 +249,14 @@ export abstract class BridgesService implements OnModuleInit {
       this.logBridgeError(`send message failed: ${error.message}`);
       throw error;
     }
+  }
+
+  private getDataPath(type: 'storage' | 'crypto'): string {
+    const dataPath = path.join(process.cwd(), 'data', type, this.appId);
+    if (!fs.existsSync(dataPath)) {
+      fs.mkdirSync(dataPath, { recursive: true });
+    }
+    return dataPath;
   }
 
   // 日志工具方法
