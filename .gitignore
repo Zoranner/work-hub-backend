@@ -44,3 +44,4 @@ configs/*.config.json
 !configs/*.config.json.example
 
 **/*.db
+data/
