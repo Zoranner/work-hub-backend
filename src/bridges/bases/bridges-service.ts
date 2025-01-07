@@ -83,16 +83,12 @@ export abstract class BridgesService implements OnModuleInit {
     };
 
     try {
-      // 设置存储
+      // 初始化存储和加密
       const storage = new SimpleFsStorageProvider(path.join(process.cwd(), 'storage', this.appId));
-
-      // 确保加密存储目录存在
       const cryptoPath = path.join(process.cwd(), 'data', 'crypto', this.appId);
       if (!fs.existsSync(cryptoPath)) {
         fs.mkdirSync(cryptoPath, { recursive: true });
       }
-
-      // 设置加密存储
       const cryptoStore = new RustSdkAppserviceCryptoStorageProvider(cryptoPath, StoreType.Sqlite);
 
       // 设置日志
@@ -114,19 +110,13 @@ export abstract class BridgesService implements OnModuleInit {
         },
       });
 
-      // 获取 bot client
+      // 初始化 bot client
       this.botClient = this.appservice.botIntent.underlyingClient;
       await this.appservice.botIntent.enableEncryption();
       AutojoinRoomsMixin.setupOnClient(this.botClient);
 
-      // 设置事件处理
-      this.appservice.on('room.message', this.handleMessage.bind(this));
-      this.appservice.on('room.encrypted', this.handleEncryptedMessage.bind(this));
-      this.appservice.on('room.join', this.handleJoin.bind(this));
-      this.appservice.on('room.failed_decryption', this.handleFailedDecryption.bind(this));
-      this.appservice.on('query.user', this.handleUserQuery.bind(this));
-      this.appservice.on('query.key', this.handleKeyQuery.bind(this));
-      this.appservice.on('query.key_claim', this.handleKeyClaimQuery.bind(this));
+      // 注册事件处理器
+      this.registerEventHandlers();
 
       // 启动服务
       await this.appservice.begin();
@@ -141,6 +131,22 @@ export abstract class BridgesService implements OnModuleInit {
     }
   }
 
+  // 事件处理器注册
+  private registerEventHandlers() {
+    // 房间事件
+    this.appservice.on('room.message', this.handleMessage.bind(this));
+    this.appservice.on('room.encrypted', this.handleEncryptedMessage.bind(this));
+    this.appservice.on('room.join', this.handleJoin.bind(this));
+    this.appservice.on('room.invite', this.handleInvite.bind(this));
+    this.appservice.on('room.failed_decryption', this.handleFailedDecryption.bind(this));
+
+    // 查询事件
+    this.appservice.on('query.user', this.handleUserQuery.bind(this));
+    this.appservice.on('query.key', this.handleKeyQuery.bind(this));
+    this.appservice.on('query.key_claim', this.handleKeyClaimQuery.bind(this));
+  }
+
+  // 房间事件处理方法
   protected async handleMessage(roomId: string, event: any) {
     if (event.sender === (await this.botClient.getUserId())) {
       return;
@@ -169,34 +175,31 @@ export abstract class BridgesService implements OnModuleInit {
     }
   }
 
-  protected async handleFailedDecryption(roomId: string, event: any, error: Error) {
-    this.logBridgeError(`Failed to decrypt message in room ${roomId}: ${error.message}`);
-  }
-
-  protected async handleKeyQuery(req: any, done: (response: any) => void) {
-    this.logBridgeMessage(`Key query request: ${JSON.stringify(req)}`);
-    done({});
-  }
-
-  protected async handleKeyClaimQuery(req: any, done: (response: any) => void) {
-    this.logBridgeMessage(`Key claim request: ${JSON.stringify(req)}`);
-    done({});
-  }
-
-  protected async processMessage(roomId: string, sender: string, content: string) {
-    // 子类实现具体的消息处理逻辑
-  }
-
   protected async handleJoin(roomId: string, event: any) {
     this.logBridgeMessage(`joined room ${roomId}`);
-    await this.sendMessage(roomId, `已加入房间 ${roomId}`, true);
 
-    // 如果是加密房间，确保启用加密
     if (await this.botClient.crypto.isRoomEncrypted(roomId)) {
-      await this.botClient.crypto.prepare();
+      this.logBridgeMessage(`room ${roomId} is encrypted`);
+    }
+
+    await this.sendMessage(roomId, `已加入房间 ${roomId}`, true);
+  }
+
+  protected async handleInvite(roomId: string, event: any) {
+    this.logBridgeMessage(`received invite for room ${roomId} from ${event.sender}`);
+    try {
+      await this.botClient.joinRoom(roomId);
+      this.logBridgeMessage(`automatically joined room ${roomId}`);
+    } catch (error) {
+      this.logBridgeError(`failed to join room ${roomId}: ${error.message}`);
     }
   }
 
+  protected async handleFailedDecryption(roomId: string, event: any, error: Error) {
+    this.logBridgeError(`failed to decrypt message in room ${roomId}: ${error.message}`);
+  }
+
+  // 查询事件处理方法
   protected async handleUserQuery(userId: string) {
     this.logBridgeMessage(`received user query: ${userId}`);
     if (userId === `@${this.appId}:${this.config.homeserver.domain}`) {
@@ -208,6 +211,20 @@ export abstract class BridgesService implements OnModuleInit {
     return null;
   }
 
+  protected async handleKeyQuery(req: any, done: (response: any) => void) {
+    this.logBridgeMessage(`key query request: ${JSON.stringify(req)}`);
+    done({});
+  }
+
+  protected async handleKeyClaimQuery(req: any, done: (response: any) => void) {
+    this.logBridgeMessage(`key claim request: ${JSON.stringify(req)}`);
+    done({});
+  }
+
+  // 消息处理方法
+  protected abstract processMessage(roomId: string, sender: string, content: string): Promise<void>;
+
+  // 消息发送方法
   async sendMessage(roomId: string, content: string, markdown: boolean = false) {
     try {
       let messageContent: any;
@@ -235,6 +252,7 @@ export abstract class BridgesService implements OnModuleInit {
     }
   }
 
+  // 日志工具方法
   protected logBridgeMessage(message: string) {
     this.logger.log(`${BridgesService.name} ${this.appId}-bridge ${message}`);
   }
